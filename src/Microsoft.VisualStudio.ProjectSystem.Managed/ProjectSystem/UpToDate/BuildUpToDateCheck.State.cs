@@ -398,6 +398,7 @@ namespace Microsoft.VisualStudio.ProjectSystem.UpToDate
                     upToDateCheckOutputItemsBySetName: upToDateCheckOutputItems,
                     upToDateCheckBuiltItemsBySetName: upToDateCheckBuiltItems,
                     copiedOutputFiles: copiedOutputFiles,
+                    copyToOutputDirectoryItems: copyToOutputDirectoryItems.ToImmutable(),
                     resolvedAnalyzerReferencePaths: resolvedAnalyzerReferencePaths,
                     resolvedCompilationReferencePaths: resolvedCompilationReferencePaths,
                     copyReferenceInputs: copyReferenceInputs,
