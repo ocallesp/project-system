@@ -9,11 +9,9 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Build.Exceptions;
-using Microsoft.VisualStudio.ProjectSystem.Properties;
 using Microsoft.VisualStudio.ProjectSystem.VS.References.Roslyn;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
-using Task = System.Threading.Tasks.Task;
 
 namespace Microsoft.VisualStudio.ProjectSystem.VS.References
 {
@@ -39,14 +37,24 @@ namespace Microsoft.VisualStudio.ProjectSystem.VS.References
             _solution = solution;
         }
 
+        public string GetTargetFrameworkMoniker(CodeAnalysis.ProjectId projectId)
+        {
+            throw new NotImplementedException();
+        }
+
+        public Task<string> GetProjectAssetsFilePathAsync(string projectPath, CancellationToken cancellationToken)
+        {
+            throw new NotImplementedException();
+        }
+
         public Task<string> GetProjectAssetsFilePathAsync(string projectPath, string targetFramework, CancellationToken cancellationToken)
         {
             throw new NotImplementedException();
         }
 
-        public async Task<ImmutableArray<Reference>> GetProjectReferencesAsync(string projectPath, string targetFramework, CancellationToken cancellationToken)
+        public async Task<ImmutableArray<ReferenceInfo>> GetProjectReferencesAsync(string projectPath, string targetFramework, CancellationToken cancellationToken)
         {
-            List<Reference> references;
+            List<ReferenceInfo> references;
 
             try
             {
@@ -85,7 +93,7 @@ namespace Microsoft.VisualStudio.ProjectSystem.VS.References
             return unconfiguredProject;
         }
 
-        private async Task<List<Reference>> GetAllReferencesInConfiguredProjectAsync(ConfiguredProject selectedConfiguredProject)
+        private async Task<List<ReferenceInfo>> GetAllReferencesInConfiguredProjectAsync(ConfiguredProject selectedConfiguredProject)
         {
             GetProjectSnapshotAsync(selectedConfiguredProject);
 
@@ -102,53 +110,56 @@ namespace Microsoft.VisualStudio.ProjectSystem.VS.References
             _sdkReferenceHandler.GetProjectSnapshot(selectedConfiguredProject);
         }
 
-        private List<Reference> GetReferences()
+        private List<ReferenceInfo> GetReferences()
         {
-            List<Reference> references = new List<Reference>();
+            List<ReferenceInfo> references = new List<ReferenceInfo>();
 
-            _projectReferenceHandler.GetAndAppendReferences(references);
-            _packageReferenceHandler.GetAndAppendReferences(references);
-            _assemblyReferenceHandler.GetAndAppendReferences(references);
-            _sdkReferenceHandler.GetAndAppendReferences(references);
+            references.AddRange(_projectReferenceHandler.GetReferences());
+            references.AddRange(_packageReferenceHandler.GetReferences());
+            references.AddRange(_assemblyReferenceHandler.GetReferences());
+            references.AddRange(_sdkReferenceHandler.GetReferences());
 
             return references;
         }
 
-        public async Task<bool> UpdateReferencesAsync(string projectPath, string targetFramework,
-            ImmutableArray<ReferenceUpdate> referenceUpdates, CancellationToken cancellationToken)
+        public async Task<bool> TryUpdateReferenceAsync(string projectPath, string targetFrameworkMoniker, ReferenceUpdate referenceUpdate, CancellationToken cancellationToken)
         {
+            bool wasUpdated = false;
+
+            if (referenceUpdate.Action == UpdateAction.None)
+            {
+                return wasUpdated;
+            }
+
             ConfiguredProject activeConfiguredProject = await GetActiveConfiguredProjectByPathAsync(projectPath);
 
-            referenceUpdates.Where(c => c.Action == UpdateAction.Remove).ToList().ForEach(e =>
-            {
-                ReferenceHandler referenceHandler = FindReferenceHandler(e);
-                referenceHandler.RemoveReference(activeConfiguredProject, e.Reference);
-            });
+            ReferenceHandler referenceHandler = FindReferenceHandler(referenceUpdate);
 
-            referenceUpdates.Where(c => c.Action == UpdateAction.Add).ToList().ForEach(e =>
+            if (referenceUpdate.Action == UpdateAction.TreatAsUsed || referenceUpdate.Action == UpdateAction.TreatAsUnused)
             {
-                ReferenceHandler referenceHandler = FindReferenceHandler(e);
-                referenceHandler.AddReference(activeConfiguredProject, e.Reference);
-            });
-
-            var updateActions = referenceUpdates.Where(c => c.Action == UpdateAction.Update);
-            ExecuteUpdateReference(activeConfiguredProject, updateActions);
+                wasUpdated = await referenceHandler.UpdateReferenceAsync(activeConfiguredProject, referenceUpdate, cancellationToken);
+            }
+            else
+            {
+                wasUpdated = await referenceHandler.RemoveReferenceAsync(activeConfiguredProject, referenceUpdate.ReferenceInfo);
+            }
             
-            return true;
+            return wasUpdated;
         }
 
         private ReferenceHandler FindReferenceHandler(ReferenceUpdate referenceUpdate)
         {
             ReferenceHandler referenceHandler;
-            if (referenceUpdate.Reference.Type == ReferenceType.Project)
+
+            if (referenceUpdate.ReferenceInfo.ReferenceType == ReferenceType.Project)
             {
                 referenceHandler = _projectReferenceHandler;
             }
-            else if (referenceUpdate.Reference.Type == ReferenceType.Package)
+            else if (referenceUpdate.ReferenceInfo.ReferenceType == ReferenceType.Package)
             {
                 referenceHandler = _packageReferenceHandler;
             }
-            else if (referenceUpdate.Reference.Type == ReferenceType.Assembly)
+            else if (referenceUpdate.ReferenceInfo.ReferenceType == ReferenceType.Assembly)
             {
                 referenceHandler = _assemblyReferenceHandler;
             }
@@ -160,46 +171,11 @@ namespace Microsoft.VisualStudio.ProjectSystem.VS.References
             return referenceHandler;
         }
 
-        private async Task ExecuteUpdateReference(ConfiguredProject activeConfiguredProject, IEnumerable<ReferenceUpdate> updateActions)
-        {
-            // Handle all update actions together because opening the project file for edits uses
-            // locks and we don't want to delay other processes.
-            string projectPath = activeConfiguredProject.UnconfiguredProject.FullPath;
-
-            // TODO - open the project and and write to TreatAsUsed attribute using msbuild
-            await activeConfiguredProject.Services.ProjectLockService.WriteLockAsync(async access =>
-            {
-                var projectXmlAsync = await access.GetProjectXmlAsync("");
-                var items = projectXmlAsync.Items;
-
-                foreach (var update in updateActions)
-                {
-                    ReferenceHandler referenceHandler = FindReferenceHandler(update);
-
-                    foreach (var item in items)
-                    {
-
-                        if (item.ItemType == _referenceTypes[update.Reference.Type] && item.Include == update.Reference.ItemSpecification)
-                        {
-                            foreach (var child in item.Children)
-                            {
-                                if (child.ElementName == "TreatAsUsed")
-                                {
-
-                                }
-                            }
-                        }
-                    }
-                }
-
-                access.CheckoutAsync(projectPath);
-            }, CancellationToken.None);
-        }
-
         public bool IsProjectCpsBased(string projectPath)
         {
             IVsHierarchy? projectHierarchy = GetProjectHierarchy(projectPath);
             var isCps = projectHierarchy.IsCapabilityMatch("CPS");
+
             return isCps;
         }
 

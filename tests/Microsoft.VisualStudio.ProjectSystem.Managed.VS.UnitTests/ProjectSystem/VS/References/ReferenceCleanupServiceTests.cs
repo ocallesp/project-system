@@ -70,51 +70,36 @@ namespace Microsoft.VisualStudio.ProjectSystem.VS.References
         }
 
         [Fact]
+        public async void UpdateReferencesAsync_UpdatePackages_NoAction()
+        {
+            var referenceCleanupService = Setup();
+
+            var referenceUpdate1 =
+                new ReferenceUpdate(UpdateAction.None, new ReferenceInfo(ReferenceType.Package, "", true));
+
+            await referenceCleanupService.TryUpdateReferenceAsync(_projectPath1, "", referenceUpdate1, CancellationToken.None);
+
+            _configuredProjectMock1.Verify(c => c.Services.PackageReferences.RemoveAsync(It.IsAny<string>()), Times.Never);
+        }
+
+        [Fact]
         public async void UpdateReferencesAsync_RemovePackages_RemoveExecutedTwice()
         {
             var referenceCleanupService = Setup();
 
-            var referencesU = new List<ReferenceUpdate>()
-            {
-                new ReferenceUpdate(UpdateAction.Remove, new Reference(ReferenceType.Package, "", true)),
-                new ReferenceUpdate(UpdateAction.Remove, new Reference(ReferenceType.Package, "", true))
-            };
-            var referenceUpdates = referencesU.ToImmutableArray<ReferenceUpdate>();
-            await referenceCleanupService.UpdateReferencesAsync(_projectPath1, "", referenceUpdates, CancellationToken.None);
+            var referenceUpdate1 =
+                new ReferenceUpdate(UpdateAction.Remove, new ReferenceInfo(ReferenceType.Package, "", true));
+            var referenceUpdate2 =
+                new ReferenceUpdate(UpdateAction.Remove, new ReferenceInfo(ReferenceType.Package, "", true));
+            
+            await referenceCleanupService.TryUpdateReferenceAsync(_projectPath1, "", referenceUpdate1, CancellationToken.None);
 
-            _configuredProjectMock1.Verify(c=> c.Services.PackageReferences.RemoveAsync(It.IsAny<string>()), Times.Exactly(2));
-            _configuredProjectMock1.Verify(c => c.Services.PackageReferences.AddAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+            _configuredProjectMock1.Verify(c=> c.Services.PackageReferences.RemoveAsync(It.IsAny<string>()), Times.Once);
+
+            await referenceCleanupService.TryUpdateReferenceAsync(_projectPath1, "", referenceUpdate2, CancellationToken.None);
+            _configuredProjectMock1.Verify(c => c.Services.PackageReferences.RemoveAsync(It.IsAny<string>()), Times.Exactly(2));
         }
-
-        [Fact]
-        public async void UpdateReferencesAsync_AddPackages_AddExecutedTwice()
-        {
-            var referenceCleanupService = Setup();
-
-            var referencesU = new List<ReferenceUpdate>()
-            {
-                new ReferenceUpdate(UpdateAction.Add, new Reference(ReferenceType.Package, "", true)),
-                new ReferenceUpdate(UpdateAction.Add, new Reference(ReferenceType.Package, "", true))
-            };
-            var referenceUpdates = referencesU.ToImmutableArray<ReferenceUpdate>();
-
-            await referenceCleanupService.UpdateReferencesAsync(_projectPath1, "", referenceUpdates, CancellationToken.None);
-
-            _configuredProjectMock1.Verify(c => c.Services.PackageReferences.RemoveAsync(It.IsAny<string>()), Times.Never);
-            _configuredProjectMock1.Verify(c => c.Services.PackageReferences.AddAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Exactly(2));
-        }
-
-        [Fact]
-        public async void UpdateReferencesAsync_UpdatePackages_TreatAsUsedUpdated()
-        {
-            var referenceCleanupService = Setup();
-
-            var referenceUpdates = new ImmutableArray<ReferenceUpdate>();
-            await referenceCleanupService.UpdateReferencesAsync(_projectPath1, "", referenceUpdates, CancellationToken.None);
-
-            Assert.Equal(7, 7);
-        }
-
+        
         private ReferenceCleanupService Setup()
         {
             CreateReferences(out var projectItems, out var packageItems, out var assemblyItems, out var sdkItems);
@@ -271,25 +256,21 @@ namespace Microsoft.VisualStudio.ProjectSystem.VS.References
 
             var packageReferenceServicesMock = new Mock<IPackageReferencesService>();
             packageReferenceServicesMock.Setup(c => c.RemoveAsync(It.IsAny<string>()));
-            packageReferenceServicesMock.Setup(c => c.AddAsync(It.IsAny<string>(), It.IsAny<string>()));
             configuredProjectServicesMock.SetupGet(c => c.PackageReferences)
                 .Returns(packageReferenceServicesMock.Object);
 
             var projectReferenceServicesMock = new Mock<IBuildDependencyProjectReferencesService>();
             projectReferenceServicesMock.Setup(c => c.RemoveAsync(It.IsAny<string>()));
-            projectReferenceServicesMock.Setup(c => c.AddAsync(It.IsAny<string>()));
             configuredProjectServicesMock.SetupGet(c => c.ProjectReferences)
                 .Returns(projectReferenceServicesMock.Object);
 
             var assemblyReferenceServicesMock = new Mock<IAssemblyReferencesService>();
             assemblyReferenceServicesMock.Setup(c => c.RemoveAsync(null, It.IsAny<string>()));
-            assemblyReferenceServicesMock.Setup(c => c.AddAsync(null, It.IsAny<string>()));
             configuredProjectServicesMock.SetupGet(c => c.AssemblyReferences)
                 .Returns(assemblyReferenceServicesMock.Object);
 
             var sdkReferenceServicesMock = new Mock<ISdkReferencesService>();
             assemblyReferenceServicesMock.Setup(c => c.RemoveAsync(null, It.IsAny<string>()));
-            assemblyReferenceServicesMock.Setup(c => c.AddAsync(null, It.IsAny<string>()));
             configuredProjectServicesMock.SetupGet(c => c.SdkReferences)
                 .Returns(sdkReferenceServicesMock.Object);
 
