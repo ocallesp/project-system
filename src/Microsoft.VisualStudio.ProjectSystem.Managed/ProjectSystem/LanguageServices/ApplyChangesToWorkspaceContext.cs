@@ -69,10 +69,17 @@ namespace Microsoft.VisualStudio.ProjectSystem.LanguageServices
             {
                 IComparable version = GetConfiguredProjectVersion(update);
 
-                ProcessOptions(projectChange.After);
                 await ProcessCommandLineAsync(version, projectChange.Difference, state, cancellationToken);
                 ProcessProjectBuildFailure(projectChange.After);
             }
+        }
+
+        public void SetCommandLineArgumentsToBuild(IEnumerable<string> arguments)
+        {
+            Assumes.NotNull(_context);
+
+            // We just pass all options to Roslyn
+            _context.SetOptions(arguments.ToImmutableArray());
         }
 
         public Task ApplyProjectEvaluationAsync(IProjectVersionedValue<IProjectSubscriptionUpdate> update, ContextState state, CancellationToken cancellationToken)
@@ -144,21 +151,6 @@ namespace Microsoft.VisualStudio.ProjectSystem.LanguageServices
                 _logger.WriteLine(succeeded ? "Last design-time build succeeded, turning semantic errors back on." : "Last design-time build failed, turning semantic errors off.");
                 _context.LastDesignTimeBuildSucceeded = succeeded;
             }
-        }
-
-        private void ProcessOptions(IProjectRuleSnapshot snapshot)
-        {
-            Assumes.NotNull(_context);
-
-            // The order of options matters and we should use warnaserror- and then warnaserror+
-            // Depending which comes first, the compiler produces different diagnostics.
-            // We just need to move warnaserror+ to the end.
-            var warnaserrorPlus = snapshot.Items.FirstOrDefault(a => a.Key.Contains("/warnaserror+"));
-            IEnumerable<string> commandLineArguments = warnaserrorPlus.Key is null ? snapshot.Items.Keys :
-                    snapshot.Items.Remove(warnaserrorPlus.Key).Keys.Append(warnaserrorPlus.Key);
-
-            // We just pass all options to Roslyn
-            _context.SetOptions(commandLineArguments.ToImmutableArray());
         }
 
         private Task ProcessCommandLineAsync(IComparable version, IProjectChangeDiff differences, ContextState state, CancellationToken cancellationToken)
